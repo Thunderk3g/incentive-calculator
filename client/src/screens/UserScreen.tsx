@@ -413,9 +413,6 @@ const UserScreen: React.FC = () => {
   }
 
   // STEP 2: Spreadsheet Logic
-  const sortedColumns = [...config.criterionColumns].sort(
-    (a, b) => a.order - b.order
-  );
   const totalIncentive = calculationResult?.totalIncentive || 0;
   const deferredIncentive = calculationResult?.deferredIncentive || 0;
   const isEligible = policies.length >= 3;
