@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useConfig } from "../context/ConfigContext";
 import { calculateDynamicIncentives } from "../utils/dynamicCalculator";
 import type {
@@ -74,6 +74,38 @@ const UserScreen: React.FC = () => {
 
   const [policies, setPolicies] = useState<DynamicPolicyRow[]>([]);
   const [calculationResult, setCalculationResult] = useState<any>(null);
+
+  // Filter vintages based on organization
+  const availableVintages = useMemo(() => {
+    if (sessionInput.organization === "Inhouse") {
+      return config.vintages.filter((v) => v === "Tier 1" || v === "Tier 2");
+    } else {
+      return config.vintages.filter(
+        (v) => v === "0-3 Months" || v === "More than 3 Months"
+      );
+    }
+  }, [sessionInput.organization, config.vintages]);
+
+  // Keep vintage in sync when organization changes
+  useEffect(() => {
+    if (!availableVintages.includes(sessionInput.vintage)) {
+      setSessionInput((prev) => ({
+        ...prev,
+        vintage: availableVintages[0] || "",
+      }));
+    }
+  }, [availableVintages]);
+
+  // Auto-calculation logic
+  useEffect(() => {
+    if (step === "spreadsheet" && policies.length > 0) {
+      const result = calculateDynamicIncentives(config, {
+        ...sessionInput,
+        policies,
+      });
+      setCalculationResult(result);
+    }
+  }, [policies, sessionInput.organization, sessionInput.vintage, step, config]);
 
   const createEmptyPolicy = (): DynamicPolicyRow => {
     const policy: DynamicPolicyRow = {
@@ -253,6 +285,7 @@ const UserScreen: React.FC = () => {
           onChange={(e) =>
             updatePolicy(policy.id, column.id, parseFloat(e.target.value) || 0)
           }
+          onWheel={(e) => (e.target as HTMLInputElement).blur()}
           className="h-9 bg-white"
         />
       );
@@ -355,7 +388,7 @@ const UserScreen: React.FC = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {config.vintages.map((v) => (
+                    {availableVintages.map((v) => (
                       <SelectItem key={v} value={v}>
                         {v}
                       </SelectItem>
@@ -523,11 +556,11 @@ const UserScreen: React.FC = () => {
             <TableHeader className="bg-muted/40">
               <TableRow>
                 {/* Sticky row number column */}
-                <TableHead className="w-[50px] text-center font-bold sticky left-0 z-20 bg-muted/40">
+                <TableHead className="w-[50px] text-center font-bold md:sticky left-0 z-20 bg-muted/40">
                   #
                 </TableHead>
                 {/* Sticky product name column */}
-                <TableHead className="text-center font-bold min-w-[130px] sticky left-[50px] z-20 bg-muted/40 border-r">
+                <TableHead className="text-center font-bold min-w-[130px] md:sticky left-[50px] z-20 bg-muted/40 border-r">
                   Product
                 </TableHead>
                 {/* Non-checkbox columns */}
@@ -578,13 +611,13 @@ const UserScreen: React.FC = () => {
                     );
                   })}
                 {/* Result columns - sticky on right */}
-                <TableHead className="text-right font-bold min-w-[80px] sticky right-[160px] z-20 bg-muted/40">
+                <TableHead className="text-right font-bold min-w-[80px] md:sticky right-[160px] z-20 bg-muted/40">
                   APE
                 </TableHead>
-                <TableHead className="text-right font-bold min-w-[80px] sticky right-[80px] z-20 bg-muted/40 text-green-600">
+                <TableHead className="text-right font-bold min-w-[80px] md:sticky right-[80px] z-20 bg-muted/40 text-green-600">
                   Payout
                 </TableHead>
-                <TableHead className="text-right font-bold min-w-[80px] sticky right-0 z-20 bg-muted/40 text-destructive">
+                <TableHead className="text-right font-bold min-w-[80px] md:sticky right-0 z-20 bg-muted/40 text-destructive">
                   Penalty
                 </TableHead>
               </TableRow>
@@ -603,7 +636,7 @@ const UserScreen: React.FC = () => {
                   {/* Sticky row number */}
                   <TableCell
                     className={cn(
-                      "text-center font-bold text-muted-foreground sticky left-0 z-10",
+                      "text-center font-bold text-muted-foreground md:sticky left-0 z-10",
                       idx % 2 === 0 ? "bg-white" : "bg-muted/20",
                       "group-hover:bg-primary/5"
                     )}
@@ -626,7 +659,7 @@ const UserScreen: React.FC = () => {
                   {/* Sticky product name */}
                   <TableCell
                     className={cn(
-                      "p-2 sticky left-[50px] z-10 border-r",
+                      "p-2 md:sticky left-[50px] z-10 border-r",
                       idx % 2 === 0 ? "bg-white" : "bg-muted/20",
                       "group-hover:bg-primary/5"
                     )}
@@ -658,7 +691,7 @@ const UserScreen: React.FC = () => {
                   {/* Sticky result columns */}
                   <TableCell
                     className={cn(
-                      "text-right font-bold text-slate-700 sticky right-[160px] z-10",
+                      "text-right font-bold text-slate-700 md:sticky right-[160px] z-10",
                       idx % 2 === 0 ? "bg-white" : "bg-muted/20",
                       "group-hover:bg-primary/5"
                     )}
@@ -667,7 +700,7 @@ const UserScreen: React.FC = () => {
                   </TableCell>
                   <TableCell
                     className={cn(
-                      "text-right font-bold text-green-600 sticky right-[80px] z-10",
+                      "text-right font-bold text-green-600 md:sticky right-[80px] z-10",
                       idx % 2 === 0 ? "bg-white" : "bg-muted/20",
                       "group-hover:bg-primary/5"
                     )}
@@ -676,7 +709,7 @@ const UserScreen: React.FC = () => {
                   </TableCell>
                   <TableCell
                     className={cn(
-                      "text-right font-bold text-destructive sticky right-0 z-10 pr-2",
+                      "text-right font-bold text-destructive md:sticky right-0 z-10 pr-2",
                       idx % 2 === 0 ? "bg-white" : "bg-muted/20",
                       "group-hover:bg-primary/5"
                     )}
@@ -706,18 +739,25 @@ const UserScreen: React.FC = () => {
         <div className="flex gap-4 w-full md:w-auto">
           <Button
             variant="outline"
+            onClick={resetForm}
+            className="h-11 border-dashed font-bold border-2"
+          >
+            <RotateCcw className="h-4 w-4 mr-2" />
+            Reset All
+          </Button>
+          <Button
             onClick={addRow}
-            className="flex-1 md:flex-none h-11 border-dashed font-bold border-2"
+            className="h-11 font-bold shadow-md bg-slate-700 hover:bg-slate-800"
           >
             <Plus className="h-4 w-4 mr-2" />
             Add Policy
           </Button>
           <Button
             onClick={handleCalculate}
-            className="flex-1 md:flex-none h-11 font-bold shadow-lg"
+            className="h-11 font-bold shadow-lg px-8 bg-primary hover:bg-primary/90"
           >
             <Calculator className="h-4 w-4 mr-2" />
-            Calculate Results
+            Calculate Now
           </Button>
         </div>
 

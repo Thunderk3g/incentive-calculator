@@ -68,6 +68,12 @@ const defaultColumns: CriterionColumn[] = [
     type: "checkbox",
     order: 13,
   },
+  {
+    id: "crossSell",
+    name: "Cross Sell (Y/N)",
+    type: "checkbox",
+    order: 14,
+  },
 ];
 
 const defaultProductTypes: ProductType[] = [
@@ -176,7 +182,7 @@ const defaultRules: CalculationRule[] = [
     id: "rule-penalty-isecure-no-autopay",
     name: "Monthly I-Secure No Autopay",
     condition:
-      'policyName === "I-Secure" && paymentFrequency === "Monthly" && autopay === false',
+      '(policyName === "I-Secure" || policyName === "I-Secure sachet") && paymentFrequency === "Monthly" && autopay === false',
     adjustment: -2000,
     type: "penalty",
   },
@@ -194,6 +200,13 @@ const defaultRules: CalculationRule[] = [
     name: "BFL Source",
     condition: "bfl === true",
     adjustment: 500,
+    type: "payout",
+  },
+  {
+    id: "rule-cross-sell",
+    name: "Non-term -> Term Cross-sell",
+    condition: "crossSell === true",
+    adjustment: 2000,
     type: "payout",
   },
   {
@@ -277,9 +290,15 @@ const defaultConfig: FlexibleIncentiveConfig = {
   vintages: ["0-3 Months", "More than 3 Months", "Tier 1", "Tier 2"],
   // ATS Table: These are multipliers (e.g., 1.10 for 110%)
   atsTable: [
-    { minAts: 20001, incentive: 0.1 }, // 110% -> 10% boost
-    { minAts: 25000, incentive: 0.25 }, // 125% -> 25% boost
-    { minAts: 40000, incentive: 0.4 }, // 140% -> 40% boost
+    { minAts: 20001, incentive: 0.1 }, // 20,001–25,000 = 110%
+    { minAts: 25001, incentive: 0.25 }, // 25,001–40,000 = 125%
+    { minAts: 40001, incentive: 0.4 }, // 40,000+ = 140% - Prompt says 40,000+ so maybe 40000? Let's use 40001 to distinguish from upper bound of 40k. Usually 40k+ includes 40k.
+    // Correction: Prompt says 25,001-40,000. So 40,000 is in 125%.
+    // And 40,000+ implies > 40,000 or >= 40,000? "40,000+" usually means >=.
+    // If ranges are connected: 20k-25k, 25k-40k... then 25k is usually in the first, 25001 starts next.
+    // Prompt: 20,001–25,000 | 25,001–40,000 | 40,000+
+    // If I have 40,000, it falls into 25,001-40,000.
+    // So 40,001 is the start of the next tier.
   ],
 };
 

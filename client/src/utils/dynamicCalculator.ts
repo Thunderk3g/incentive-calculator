@@ -7,42 +7,28 @@ import type {
   DynamicPolicyRow,
 } from "../types/index.ts";
 
+/**
+ * Checks strict eligibility for Add-ons.
+ * Rule: CI Sum Assured >= 25 Lakhs AND ADB Sum Assured >= 1 Crore.
+ * Note: This DOES NOT affect Slab Entry or NOP Count.
+ */
+function isStrictlyEligible(policy: DynamicPolicyRow): boolean {
+  const hasCI = policy.ciAbove25L === true;
+  const hasADB = policy.adb === true;
+  return hasCI && hasADB;
+}
+
 // Find matching tier table based on organization and vintage
 function findTierTable(
   config: FlexibleIncentiveConfig,
   organization: string,
   vintage: string
 ): TierTable | undefined {
-  return config.tierTables.find(
-    (t) => t.organization === organization && t.vintage === vintage
-  );
-}
-
-// Calculate base incentive from tier table
-function calculateBaseIncentive(
-  tierTable: TierTable | undefined,
-  nop: number
-): number {
-  if (!tierTable || nop < 3) return 0;
-
-  // Find matching tier or highest tier <= nop
-  const sortedTiers = [...tierTable.tiers].sort((a, b) => b.nop - a.nop);
-  const matchingTier = sortedTiers.find((t) => nop >= t.nop);
-
-  // If nop is less than the smallest nop in the table, but >= 3, handles that if 3 is logic
-  const minTierNOP = Math.min(...tierTable.tiers.map((t) => t.nop));
-  if (nop < minTierNOP) return 0;
-
-  let baseIncentive = matchingTier ? matchingTier.incentive : 0;
-
-  // Excel logic: If NOP > max tier, add 2000 per additional NOP
-  const maxTierNOP = Math.max(...tierTable.tiers.map((t) => t.nop));
-  if (nop > maxTierNOP && matchingTier) {
-    const additionalNOP = nop - maxTierNOP;
-    baseIncentive = matchingTier.incentive + additionalNOP * 2000;
+  let lookupVintage = vintage;
+  if (vintage === "More than 3 Months") {
+    lookupVintage = "Tier 1";
   }
-
-  return baseIncentive;
+  return config.tierTables.find((t) => t.vintage === lookupVintage);
 }
 
 // Evaluate a condition string against policy data
@@ -51,11 +37,9 @@ function evaluateCondition(
   policy: DynamicPolicyRow
 ): boolean {
   try {
-    // Simple eval replacement
     let evalString = condition;
     Object.keys(policy).forEach((key) => {
       const value = (policy as any)[key];
-      // For boolean fields like ekyc, AA, etc.
       const valueStr = typeof value === "string" ? `"${value}"` : String(value);
       evalString = evalString.replace(
         new RegExp(`\\b${key}\\b`, "g"),
@@ -93,17 +77,23 @@ export function calculateAPE(policy: DynamicPolicyRow): number {
 // Apply calculation rules to a policy
 function applyCalculationRules(
   policy: DynamicPolicyRow,
-  rules: CalculationRule[]
+  rules: CalculationRule[],
+  isEligible: boolean
 ): { payouts: number; penalties: number } {
   let totalPayouts = 0;
   let totalPenalties = 0;
 
   rules.forEach((rule) => {
     if (evaluateCondition(rule.condition, policy)) {
-      if (rule.type === "payout") {
-        totalPayouts += rule.adjustment;
+      if (rule.type === "penalty") {
+        // Penalties apply to ALL policies, regardless of eligibility
+        totalPenalties += Math.abs(rule.adjustment);
       } else {
-        totalPenalties += Math.abs(rule.adjustment); // penalties usually negative in rule, but for summary we want abs
+        // Add-ons (Positive Incentives) apply ONLY if Policy is Eligible
+        // Rule: "If policy is NOT eligible -> NO positive add-ons"
+        if (isEligible) {
+          totalPayouts += rule.adjustment;
+        }
       }
     }
   });
@@ -112,125 +102,164 @@ function applyCalculationRules(
 }
 
 /**
- * Calculate incentives for all policies using flexible configuration
+ * Calculate incentives strictly according to Master Prompt
  */
 export function calculateDynamicIncentives(
   config: FlexibleIncentiveConfig,
   input: BulkSessionInput
 ): DynamicCalculationResult {
-  const totalNOP = input.policies.length;
+  const policies = input.policies;
 
-  // 1. Min 3 policy gate (universal minimum)
-  if (totalNOP < 3) {
+  // 1. Term NOP
+  // Rule: TOTAL number of TERM policies in the session.
+  // Includes I-Secure / I-Secure Sachet. Includes policies WITHOUT CI or ADB.
+  const termNOP = policies.length;
+
+  // 2. Gate Criteria (Hard Stop)
+  // Gate is checked using TOTAL TERM NOP — never eligible NOP.
+  // 0–3 Months (HRO): 3
+  // Tier 1 (>3 months): 4
+  // Tier 2: 5
+
+  // Normalize Vintage
+  let effectiveVintage = input.vintage;
+  if (effectiveVintage === "More than 3 Months") effectiveVintage = "Tier 1";
+
+  let minGateRequired = 4; // Default to Tier 1
+  if (effectiveVintage === "Tier 2") minGateRequired = 5;
+  else if (effectiveVintage === "0-3 Months") minGateRequired = 3;
+
+  const gatePassed = termNOP >= minGateRequired;
+
+  if (!gatePassed) {
+    // If gate fails -> Total Incentive = 0
     return {
-      policies: input.policies.map((p) => ({
+      policies: policies.map((p) => ({
         ...p,
-        baseIncentive: 0,
+        ape: calculateAPE(p),
         additionalPayout: 0,
         totalPenalty: 0,
         totalIncentive: 0,
+        isDeferred: false,
       })),
       totalIncentive: 0,
       deferredIncentive: 0,
       averageTicketSize: 0,
       atsIncentive: 0,
-      breakdown: { totalBase: 0, totalPayouts: 0, totalPenalties: 0 },
+      breakdown: {
+        totalBase: 0,
+        totalPayouts: 0,
+        totalPenalties: 0,
+        totalRate: 0,
+      },
     };
   }
 
+  // 3. Slab Incentive
+  // Slab is selected using TOTAL TERM NOP
+  let baseFromSlab = 0;
   const tierTable = findTierTable(config, input.organization, input.vintage);
 
-  // 2. Base Incentive from slab lookup
-  let baseFromSlab = calculateBaseIncentive(tierTable, totalNOP);
+  if (tierTable) {
+    const sortedTiers = [...tierTable.tiers].sort((a, b) => b.nop - a.nop);
+    const matchingTier = sortedTiers.find((t) => termNOP >= t.nop);
 
-  // 3. Incremental incentive beyond slab cap
-  // Slab caps: HRO = 15, Tier 1 = 16, Tier 2 = 17
-  let slabCap = 15; // Default for HRO (Outsource 0-3 Months)
-  if (input.vintage === "Tier 1") {
-    slabCap = 16;
-  } else if (input.vintage === "Tier 2") {
-    slabCap = 17;
+    if (matchingTier) {
+      baseFromSlab = matchingTier.incentive;
+
+      // 3.2 Above-Slab Logic
+      // If TOTAL TERM NOP > Max Slab NOP, Extra = (Excess * 2000)
+      const maxTierNOP = Math.max(...tierTable.tiers.map((t) => t.nop));
+      if (termNOP > maxTierNOP) {
+        const excess = termNOP - maxTierNOP;
+        baseFromSlab += excess * 2000;
+      }
+    }
   }
 
-  let incrementalIncentive = 0;
-  if (totalNOP > slabCap) {
-    incrementalIncentive = (totalNOP - slabCap) * 2000;
-  }
+  // 4. Calculate total APE and ATS Booster multiplier
+  const totalAPE = policies.reduce((sum, p) => sum + calculateAPE(p), 0);
+  const averageTicketSize = termNOP > 0 ? totalAPE / termNOP : 0;
 
-  const totalBase = baseFromSlab + incrementalIncentive;
-
-  // 4. Process each policy for add-ons, penalties, APE, and deferred status
-  let totalPayouts = 0;
-  let totalPenalties = 0;
-  let totalAPE = 0;
-  let deferredCount = 0;
-
-  const calculatedPolicies = input.policies.map((policy) => {
-    const ape = calculateAPE(policy);
-    totalAPE += ape;
-
-    const { payouts, penalties } = applyCalculationRules(
-      policy,
-      config.calculationRules
-    );
-    totalPayouts += payouts;
-    totalPenalties += penalties;
-
-    // Deferral check: I-Secure Monthly
-    const isDeferred =
-      policy.policyName === "I-Secure" && policy.paymentFrequency === "Monthly";
-    if (isDeferred) deferredCount++;
-
-    return {
-      ...policy,
-      ape,
-      additionalPayout: payouts,
-      totalPenalty: penalties,
-      isDeferred,
-    };
-  });
-
-  // 5. ATS Calculation (Average Ticket Size is Sum(APE) / NOP)
-  const averageTicketSize = totalAPE / totalNOP;
-
-  // Pre-ATS total = Base + Add-ons - Penalties
-  const preAtsTotal = totalBase + totalPayouts - totalPenalties;
-
-  // 6. ATS Booster (multiplier applied to preAtsTotal)
   let atsMultiplier = 0;
   if (config.atsTable) {
-    // Sort descending by minAts to find the highest matching tier
     const sortedAts = [...config.atsTable].sort((a, b) => b.minAts - a.minAts);
     const matchingAts = sortedAts.find((s) => averageTicketSize >= s.minAts);
     if (matchingAts) {
       atsMultiplier = matchingAts.incentive;
     }
   }
-  const atsBoosterAmount = preAtsTotal * atsMultiplier;
 
-  // 7. Final Pool (before deferral split)
-  const earningPool = preAtsTotal + atsBoosterAmount;
+  // 5. Process Policies (Add-ons, Penalties, Deferrals)
+  // Slab base is split equally per policy for attribution.
+  // Booster applies to (Base Share + Add-ons - Penalties) per policy.
 
-  // 8. Deferred Payout Logic (I-Secure Monthly)
-  // We split the pool proportionally based on deferred vs non-deferred policies
-  // Logic: Rate = Pool / TotalNOP
-  // Immediate = (TotalNOP - DeferredNOP) * Rate
-  // Deferred = DeferredNOP * Rate
-  const ratePerPolicy = earningPool / totalNOP;
-  const totalToRelease = (totalNOP - deferredCount) * ratePerPolicy;
-  const totalDeferred = deferredCount * ratePerPolicy;
+  let totalPayouts = 0;
+  let totalPenalties = 0;
+  let totalBoostAmount = 0;
+  let totalReleasedNow = 0;
+  let totalDeferredLater = 0;
+
+  const baseSharePerPolicy = termNOP > 0 ? baseFromSlab / termNOP : 0;
+
+  const calculatedPolicies = policies.map((policy) => {
+    const ape = calculateAPE(policy);
+    const isEligible = isStrictlyEligible(policy);
+
+    // Apply Add-ons & Penalties
+    const { payouts, penalties } = applyCalculationRules(
+      policy,
+      config.calculationRules,
+      isEligible
+    );
+
+    totalPayouts += payouts;
+    totalPenalties += penalties;
+
+    // Generated Value for this policy (pre-boost)
+    const generatedPreBoost = baseSharePerPolicy + payouts - penalties;
+
+    // Apply Booster to this specific policy's value
+    const boosterForPolicy = generatedPreBoost * atsMultiplier;
+    totalBoostAmount += boosterForPolicy;
+
+    const totalPolicyValue = generatedPreBoost + boosterForPolicy;
+
+    // 6. I-Secure Deferred Incentive
+    // Rule: If (I-Secure OR I-Secure Sachet) AND Monthly -> ENTIRE product value is deferred
+    const isISecureMonthly =
+      (policy.policyName === "I-Secure" ||
+        policy.policyName === "I-Secure sachet") &&
+      policy.paymentFrequency === "Monthly";
+
+    if (isISecureMonthly) {
+      totalDeferredLater += totalPolicyValue;
+    } else {
+      totalReleasedNow += totalPolicyValue;
+    }
+
+    return {
+      ...policy,
+      ape,
+      additionalPayout: payouts,
+      totalPenalty: penalties,
+      isDeferred: isISecureMonthly,
+      totalIncentive: totalPolicyValue, // Value Generated
+    };
+  });
 
   return {
     policies: calculatedPolicies,
-    totalIncentive: totalToRelease, // Released immediately
-    deferredIncentive: totalDeferred,
+    totalIncentive: totalReleasedNow, // Released Immediately
+    deferredIncentive: totalDeferredLater, // Released Later
     averageTicketSize,
-    atsIncentive: atsBoosterAmount,
+    atsIncentive: totalBoostAmount,
     breakdown: {
-      totalBase,
+      totalBase: baseFromSlab,
       totalPayouts,
       totalPenalties,
-      totalRate: ratePerPolicy,
+      totalRate:
+        termNOP > 0 ? (totalReleasedNow + totalDeferredLater) / termNOP : 0,
     },
   };
 }
