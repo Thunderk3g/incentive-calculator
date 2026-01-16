@@ -471,6 +471,15 @@ const UserScreen: React.FC = () => {
             <div className="w-px h-12 bg-border hidden md:block" />
             <div className="text-center">
               <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+                Grand Total
+              </div>
+              <div className="text-xl font-bold text-blue-600">
+                ₹{(totalIncentive + deferredIncentive).toLocaleString()}
+              </div>
+            </div>
+            <div className="w-px h-12 bg-border hidden md:block" />
+            <div className="text-center">
+              <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
                 Avg Ticket Size
               </div>
               <div className="text-xl font-bold text-slate-800">
@@ -579,14 +588,17 @@ const UserScreen: React.FC = () => {
                     );
                   })}
                 {/* Result columns - sticky on right */}
-                <TableHead className="text-right font-bold min-w-[80px] md:sticky right-[160px] z-20 bg-muted/40">
+                <TableHead className="text-right font-bold min-w-[80px] md:sticky right-[240px] z-20 bg-muted/40">
                   APE
                 </TableHead>
-                <TableHead className="text-right font-bold min-w-[80px] md:sticky right-[80px] z-20 bg-muted/40 text-green-600">
+                <TableHead className="text-right font-bold min-w-[80px] md:sticky right-[160px] z-20 bg-muted/40 text-green-600">
                   Payout
                 </TableHead>
-                <TableHead className="text-right font-bold min-w-[80px] md:sticky right-0 z-20 bg-muted/40 text-destructive">
+                <TableHead className="text-right font-bold min-w-[80px] md:sticky right-[80px] z-20 bg-muted/40 text-destructive">
                   Penalty
+                </TableHead>
+                <TableHead className="text-right font-bold min-w-[80px] md:sticky right-0 z-20 bg-muted/40 text-blue-600">
+                  Total
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -659,7 +671,7 @@ const UserScreen: React.FC = () => {
                   {/* Sticky result columns */}
                   <TableCell
                     className={cn(
-                      "text-right font-bold text-slate-700 md:sticky right-[160px] z-10",
+                      "text-right font-bold text-slate-700 md:sticky right-[240px] z-10",
                       idx % 2 === 0 ? "bg-white" : "bg-muted/20",
                       "group-hover:bg-primary/5"
                     )}
@@ -668,7 +680,7 @@ const UserScreen: React.FC = () => {
                   </TableCell>
                   <TableCell
                     className={cn(
-                      "text-right font-bold text-green-600 md:sticky right-[80px] z-10",
+                      "text-right font-bold text-green-600 md:sticky right-[160px] z-10",
                       idx % 2 === 0 ? "bg-white" : "bg-muted/20",
                       "group-hover:bg-primary/5"
                     )}
@@ -677,14 +689,23 @@ const UserScreen: React.FC = () => {
                   </TableCell>
                   <TableCell
                     className={cn(
-                      "text-right font-bold text-destructive md:sticky right-0 z-10 pr-2",
+                      "text-right font-bold text-destructive md:sticky right-[80px] z-10",
+                      idx % 2 === 0 ? "bg-white" : "bg-muted/20",
+                      "group-hover:bg-primary/5"
+                    )}
+                  >
+                    -{(policy.totalPenalty || 0).toLocaleString()}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "text-right font-bold text-blue-600 md:sticky right-0 z-10 pr-2",
                       idx % 2 === 0 ? "bg-white" : "bg-muted/20",
                       "group-hover:bg-primary/5"
                     )}
                   >
                     <div className="flex items-center justify-end gap-1">
                       <span>
-                        -{(policy.totalPenalty || 0).toLocaleString()}
+                        ₹{(policy.totalIncentive || 0).toLocaleString()}
                       </span>
                       <Button
                         variant="ghost"

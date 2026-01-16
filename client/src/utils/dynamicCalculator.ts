@@ -334,6 +334,26 @@ export function calculateDynamicIncentives(
     };
   });
 
+  const grandTotal = totalReleasedNow + deferredIncentive;
+  console.log("--- Calculation Summary ---");
+  console.log("Total Released Now:", totalReleasedNow);
+  console.log("Deferred Incentive:", deferredIncentive);
+  console.log("Grand Total (Released + Deferred):", grandTotal);
+  console.log("Average Ticket Size:", resultAll.averageTicketSize);
+  console.log("ATS Incentive:", resultAll.totalBoostAmount);
+  console.log("Base From Slab:", resultAll.baseFromSlab);
+  console.log(
+    "Policies:",
+    finalPolicies.map((p) => ({
+      id: p.id,
+      ape: p.ape,
+      basePayout: p.additionalPayout, // Payouts from rules
+      penalty: p.totalPenalty,
+      totalIncentive: p.totalIncentive,
+      isDeferred: p.isDeferred,
+    }))
+  );
+
   return {
     policies: finalPolicies,
     totalIncentive: totalReleasedNow, // Released Immediately
