@@ -66,8 +66,6 @@ const UserScreen: React.FC = () => {
     organization: config.organizations[0] || "Inhouse",
     vintage: config.vintages[2] || "Tier 1",
     productType: config.productTypes[0]?.id || "term",
-    employeeName: "",
-    employeeId: "",
     numPolicies: 1,
     policies: [],
   });
@@ -76,7 +74,7 @@ const UserScreen: React.FC = () => {
   const [calculationResult, setCalculationResult] = useState<any>(null);
 
   // Filter vintages based on organization
-  const availableVintages = useMemo(() => {
+  const availableVintages: string[] = useMemo(() => {
     if (sessionInput.organization === "Inhouse") {
       return config.vintages.filter((v) => v === "Tier 1" || v === "Tier 2");
     } else {
@@ -323,34 +321,7 @@ const UserScreen: React.FC = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Employee Name</Label>
-                <Input
-                  value={sessionInput.employeeName}
-                  onChange={(e) =>
-                    setSessionInput({
-                      ...sessionInput,
-                      employeeName: e.target.value,
-                    })
-                  }
-                  placeholder="Enter your name"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Employee ID</Label>
-                <Input
-                  value={sessionInput.employeeId}
-                  onChange={(e) =>
-                    setSessionInput({
-                      ...sessionInput,
-                      employeeId: e.target.value,
-                    })
-                  }
-                  placeholder="Enter your ID"
-                />
-              </div>
-            </div>
+            {/* Employee Name and ID removed */}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -415,9 +386,7 @@ const UserScreen: React.FC = () => {
 
             <Button
               onClick={handleStartSpreadsheet}
-              disabled={
-                !sessionInput.employeeName || sessionInput.numPolicies < 1
-              }
+              disabled={sessionInput.numPolicies < 1}
               className="w-full h-12 text-lg font-bold shadow-md hover:shadow-lg transition-all"
             >
               Start Entering Policies
@@ -457,10 +426,9 @@ const UserScreen: React.FC = () => {
         <Card className="md:col-span-1 border-primary/20 bg-primary/5">
           <CardHeader className="py-4">
             <CardTitle className="text-lg text-primary truncate">
-              {sessionInput.employeeName}
+              Incentive Summary
             </CardTitle>
             <CardDescription className="flex flex-col gap-0.5">
-              <span>ID: {sessionInput.employeeId}</span>
               <span className="font-medium text-primary/70">
                 {sessionInput.organization} • {sessionInput.vintage}
               </span>

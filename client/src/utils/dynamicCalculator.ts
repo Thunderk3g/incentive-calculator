@@ -21,7 +21,6 @@ function isStrictlyEligible(policy: DynamicPolicyRow): boolean {
 // Find matching tier table based on organization and vintage
 function findTierTable(
   config: FlexibleIncentiveConfig,
-  organization: string,
   vintage: string
 ): TierTable | undefined {
   let lookupVintage = vintage;
@@ -153,7 +152,7 @@ function calculateIncentiveForSubset(
 
   // 3. Slab Incentive
   let baseFromSlab = 0;
-  const tierTable = findTierTable(config, input.organization, input.vintage);
+  const tierTable = findTierTable(config, input.vintage);
 
   if (tierTable) {
     const sortedTiers = [...tierTable.tiers].sort((a, b) => b.nop - a.nop);

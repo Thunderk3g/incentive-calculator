@@ -39,17 +39,22 @@ export type CalculationResult = {
 // ============================================================================
 
 // Column field types
-export type ColumnType = 'dropdown' | 'checkbox' | 'number' | 'text' | 'calculated';
+export type ColumnType =
+  | "dropdown"
+  | "checkbox"
+  | "number"
+  | "text"
+  | "calculated";
 
 // Admin-configurable criterion column
 export type CriterionColumn = {
   id: string;
   name: string;
   type: ColumnType;
-  dropdownOptions?: string[];  // For dropdown type
-  formula?: string;  // For calculated type
+  dropdownOptions?: string[]; // For dropdown type
+  formula?: string; // For calculated type
   defaultValue?: any;
-  order: number;  // Display order
+  order: number; // Display order
 };
 
 // Product type configuration
@@ -62,8 +67,8 @@ export type ProductType = {
 // Tier lookup table for different org/vintage combinations
 export type TierTable = {
   id: string;
-  organization: string;  // "Inhouse", "Outsource"
-  vintage: string;  // "0-3 months", "3-6 months", etc.
+  organization: string; // "Inhouse", "Outsource"
+  vintage: string; // "0-3 months", "3-6 months", etc.
   tiers: Tier[];
 };
 
@@ -71,8 +76,8 @@ export type TierTable = {
 export type CalculationRule = {
   id: string;
   name: string;
-  condition: string;  // JSON expression or simple condition
-  adjustment: number;  // Amount to add/subtract
+  condition: string; // JSON expression or simple condition
+  adjustment: number; // Amount to add/subtract
   type: "payout" | "penalty";
 };
 
@@ -83,15 +88,15 @@ export type FlexibleIncentiveConfig = {
   criterionColumns: CriterionColumn[];
   tierTables: TierTable[];
   calculationRules: CalculationRule[];
-  organizations: string[];  // ["Inhouse", "Outsource"]
-  vintages: string[];  // ["0-3 months", "3-6 months", etc.]
+  organizations: string[]; // ["Inhouse", "Outsource"]
+  vintages: string[]; // ["0-3 months", "3-6 months", etc.]
   atsTable?: { minAts: number; incentive: number }[];
 };
 
 // Policy entry with dynamic fields
 export type DynamicPolicyRow = {
   id: string;
-  [key: string]: any;  // Dynamic fields based on configured columns
+  [key: string]: any; // Dynamic fields based on configured columns
 };
 
 // User session input for bulk calculation
@@ -100,15 +105,14 @@ export type BulkSessionInput = {
   organization: string;
   vintage: string;
   productType: string;
-  employeeName: string;
-  employeeId: string;
+
   numPolicies: number;
   policies: DynamicPolicyRow[];
 };
 
 // Calculation result for dynamic system
 export type DynamicCalculationResult = {
-  policies: DynamicPolicyRow[];  // Includes calculated fields
+  policies: DynamicPolicyRow[]; // Includes calculated fields
   totalIncentive: number;
   deferredIncentive: number;
   averageTicketSize: number;
