@@ -275,11 +275,47 @@ export function calculateDynamicIncentives(
   // We use Math.max(0, ...) security, though logically it should be positive if simple additivity holds.
   // However, removing policies *could* technically increase value if they were dragging down ATS significantly,
   // but usually volume incentives > ATS drag. We'll trust the diff.
-  const deferredIncentive = Math.max(0, totalPotential - totalImmediate);
 
   // Determine the final released amount.
-  // This is simply the result of the "Immediate Only" run.
-  const totalReleasedNow = totalImmediate;
+  let totalReleasedNow = totalImmediate;
+
+  // Gate Fallback Logic:
+  // If ALL policies passed the gate, but REMOVING deferred policies causes the count to drop below the gate,
+  // we normally get 0 from 'resultImmediate'.
+  // In this specific case, the user wants to pay on a "pro-rated base per policy" basis derived from the Full Session.
+  // We calculate this as: (Total Potential Value / Total NOP) * Immediate NOP.
+  // Note: We need to check gate criteria logic here similar to calculateIncentiveForSubset.
+
+  let effectiveVintage = input.vintage;
+  if (effectiveVintage === "More than 3 Months") effectiveVintage = "Tier 1";
+  let minGateRequired = 4;
+  if (effectiveVintage === "Tier 2") minGateRequired = 5;
+  else if (effectiveVintage === "0-3 Months") minGateRequired = 3;
+
+  const totalPassedGate = allPolicies.length >= minGateRequired;
+  const immediatePassedGate = immediatePolicies.length >= minGateRequired;
+
+  if (totalPassedGate && !immediatePassedGate && immediatePolicies.length > 0) {
+    // FALLBACK SCENARIO
+    // Calculate value per policy from the "All" run.
+    // We sum up the 'totalIncentive' (hypothetical full value) of only the immediate policies.
+    // This effectively gives them their share of the "Slab Benefit" earned by the group.
+
+    // We can't just take average * count because individual policies have specific addons/penalties.
+    // But 'resultAll.policies' contains the fully calculated value for EACH policy in the context of the full group.
+    // So we just sum the values of the immediate policies as found in 'resultAll'.
+
+    const immediateIds = new Set(immediatePolicies.map((p) => p.id));
+    totalReleasedNow = resultAll.policies
+      .filter((p) => immediateIds.has(p.id))
+      .reduce((sum, p) => sum + (p.totalIncentive || 0), 0);
+  } else {
+    // STANDARD SCENARIO
+    totalReleasedNow = totalImmediate;
+  }
+
+  // Determine the final deferred amount after fallback logic
+  const deferredIncentive = Math.max(0, totalPotential - totalReleasedNow);
 
   // MERGE RESULTS FOR UI
   // We want to show ALL policies, but mark the relevant ones given the full context.
