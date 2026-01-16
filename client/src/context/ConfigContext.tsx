@@ -17,7 +17,12 @@ const defaultColumns: CriterionColumn[] = [
     id: "policyName",
     name: "Product Name",
     type: "dropdown",
-    dropdownOptions: ["Etouch", "I-Secure", "I-Secure sachet", "Other term"],
+    dropdownOptions: [
+      "Etouch",
+      "I-Secure Non Sachet",
+      "I-Secure sachet",
+      "Other term",
+    ],
     order: 1,
   },
   {
@@ -157,7 +162,8 @@ const defaultRules: CalculationRule[] = [
   {
     id: "rule-isecure-annual",
     name: "Annual Payments on I-Secure",
-    condition: 'policyName === "I-Secure" && paymentFrequency === "Annual"',
+    condition:
+      'policyName === "I-Secure Non Sachet" && paymentFrequency === "Annual"',
     adjustment: 1500,
     type: "payout",
   },
@@ -182,7 +188,7 @@ const defaultRules: CalculationRule[] = [
     id: "rule-penalty-isecure-no-autopay",
     name: "Monthly I-Secure No Autopay",
     condition:
-      '(policyName === "I-Secure" || policyName === "I-Secure sachet") && paymentFrequency === "Monthly" && autopay === false',
+      '(policyName === "I-Secure Non Sachet" || policyName === "I-Secure sachet") && paymentFrequency === "Monthly" && autopay === false',
     adjustment: -2000,
     type: "penalty",
   },
@@ -227,7 +233,7 @@ const defaultRules: CalculationRule[] = [
     id: "rule-aa",
     name: "Isecure & Etouch via Account Aggregator",
     condition:
-      'accountAggregator === true && (policyName === "Etouch" || policyName === "I-Secure")',
+      'accountAggregator === true && (policyName === "Etouch" || policyName === "I-Secure Non Sachet")',
     adjustment: 500,
     type: "payout",
   },

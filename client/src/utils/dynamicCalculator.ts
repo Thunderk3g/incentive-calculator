@@ -102,26 +102,27 @@ function applyCalculationRules(
 }
 
 /**
- * Calculate incentives strictly according to Master Prompt
+ * Internal helper to calculate total incentive for a specific set of policies.
+ * This function is used twice: once for ALL policies, and once for ONLY immediate policies.
+ * It DOES NOT handle deferral splits itself.
  */
-export function calculateDynamicIncentives(
+function calculateIncentiveForSubset(
   config: FlexibleIncentiveConfig,
-  input: BulkSessionInput
-): DynamicCalculationResult {
-  const policies = input.policies;
-
+  input: BulkSessionInput,
+  subsetPolicies: DynamicPolicyRow[]
+): {
+  policies: DynamicPolicyRow[];
+  totalGenerated: number;
+  baseFromSlab: number;
+  totalPayouts: number;
+  totalPenalties: number;
+  totalBoostAmount: number;
+  averageTicketSize: number;
+} {
   // 1. Term NOP
-  // Rule: TOTAL number of TERM policies in the session.
-  // Includes I-Secure / I-Secure Sachet. Includes policies WITHOUT CI or ADB.
-  const termNOP = policies.length;
+  const termNOP = subsetPolicies.length;
 
-  // 2. Gate Criteria (Hard Stop)
-  // Gate is checked using TOTAL TERM NOP — never eligible NOP.
-  // 0–3 Months (HRO): 3
-  // Tier 1 (>3 months): 4
-  // Tier 2: 5
-
-  // Normalize Vintage
+  // 2. Gate Criteria (Hard Stop) - Based on THIS subset's NOP
   let effectiveVintage = input.vintage;
   if (effectiveVintage === "More than 3 Months") effectiveVintage = "Tier 1";
 
@@ -132,9 +133,8 @@ export function calculateDynamicIncentives(
   const gatePassed = termNOP >= minGateRequired;
 
   if (!gatePassed) {
-    // If gate fails -> Total Incentive = 0
     return {
-      policies: policies.map((p) => ({
+      policies: subsetPolicies.map((p) => ({
         ...p,
         ape: calculateAPE(p),
         additionalPayout: 0,
@@ -142,21 +142,16 @@ export function calculateDynamicIncentives(
         totalIncentive: 0,
         isDeferred: false,
       })),
-      totalIncentive: 0,
-      deferredIncentive: 0,
+      totalGenerated: 0,
+      baseFromSlab: 0,
+      totalPayouts: 0,
+      totalPenalties: 0,
+      totalBoostAmount: 0,
       averageTicketSize: 0,
-      atsIncentive: 0,
-      breakdown: {
-        totalBase: 0,
-        totalPayouts: 0,
-        totalPenalties: 0,
-        totalRate: 0,
-      },
     };
   }
 
   // 3. Slab Incentive
-  // Slab is selected using TOTAL TERM NOP
   let baseFromSlab = 0;
   const tierTable = findTierTable(config, input.organization, input.vintage);
 
@@ -167,8 +162,7 @@ export function calculateDynamicIncentives(
     if (matchingTier) {
       baseFromSlab = matchingTier.incentive;
 
-      // 3.2 Above-Slab Logic
-      // If TOTAL TERM NOP > Max Slab NOP, Extra = (Excess * 2000)
+      // Above-Slab Logic
       const maxTierNOP = Math.max(...tierTable.tiers.map((t) => t.nop));
       if (termNOP > maxTierNOP) {
         const excess = termNOP - maxTierNOP;
@@ -178,7 +172,7 @@ export function calculateDynamicIncentives(
   }
 
   // 4. Calculate total APE and ATS Booster multiplier
-  const totalAPE = policies.reduce((sum, p) => sum + calculateAPE(p), 0);
+  const totalAPE = subsetPolicies.reduce((sum, p) => sum + calculateAPE(p), 0);
   const averageTicketSize = termNOP > 0 ? totalAPE / termNOP : 0;
 
   let atsMultiplier = 0;
@@ -190,19 +184,15 @@ export function calculateDynamicIncentives(
     }
   }
 
-  // 5. Process Policies (Add-ons, Penalties, Deferrals)
-  // Slab base is split equally per policy for attribution.
-  // Booster applies to (Base Share + Add-ons - Penalties) per policy.
-
+  // 5. Process Policies
   let totalPayouts = 0;
   let totalPenalties = 0;
   let totalBoostAmount = 0;
-  let totalReleasedNow = 0;
-  let totalDeferredLater = 0;
+  let totalGenerated = 0;
 
   const baseSharePerPolicy = termNOP > 0 ? baseFromSlab / termNOP : 0;
 
-  const calculatedPolicies = policies.map((policy) => {
+  const calculatedPolicies = subsetPolicies.map((policy) => {
     const ape = calculateAPE(policy);
     const isEligible = isStrictlyEligible(policy);
 
@@ -224,42 +214,105 @@ export function calculateDynamicIncentives(
     totalBoostAmount += boosterForPolicy;
 
     const totalPolicyValue = generatedPreBoost + boosterForPolicy;
-
-    // 6. I-Secure Deferred Incentive
-    // Rule: If (I-Secure OR I-Secure Sachet) AND Monthly -> ENTIRE product value is deferred
-    const isISecureMonthly =
-      (policy.policyName === "I-Secure" ||
-        policy.policyName === "I-Secure sachet") &&
-      policy.paymentFrequency === "Monthly";
-
-    if (isISecureMonthly) {
-      totalDeferredLater += totalPolicyValue;
-    } else {
-      totalReleasedNow += totalPolicyValue;
-    }
+    totalGenerated += totalPolicyValue;
 
     return {
       ...policy,
       ape,
       additionalPayout: payouts,
       totalPenalty: penalties,
-      isDeferred: isISecureMonthly,
-      totalIncentive: totalPolicyValue, // Value Generated
+      totalIncentive: totalPolicyValue,
     };
   });
 
   return {
     policies: calculatedPolicies,
-    totalIncentive: totalReleasedNow, // Released Immediately
-    deferredIncentive: totalDeferredLater, // Released Later
+    totalGenerated,
+    baseFromSlab,
+    totalPayouts,
+    totalPenalties,
+    totalBoostAmount,
     averageTicketSize,
-    atsIncentive: totalBoostAmount,
+  };
+}
+
+/**
+ * Calculate incentives strictly according to Master Prompt
+ */
+export function calculateDynamicIncentives(
+  config: FlexibleIncentiveConfig,
+  input: BulkSessionInput
+): DynamicCalculationResult {
+  const allPolicies = input.policies;
+
+  // IDENTIFY DEFERRED POLICIES
+  // Rule: If (I-Secure OR I-Secure Sachet) AND Monthly -> ENTIRE product value is deferred
+  const isDeferredPolicy = (p: DynamicPolicyRow) =>
+    (p.policyName === "I-Secure Non Sachet" ||
+      p.policyName === "I-Secure sachet") &&
+    p.paymentFrequency === "Monthly";
+
+  const immediatePolicies = allPolicies.filter((p) => !isDeferredPolicy(p));
+
+  // --- RUN 1: ALL POLICIES (Scenario A) ---
+  // This tells us the TOTAL POTENTIAL value if nothing was deferred.
+  const resultAll = calculateIncentiveForSubset(config, input, allPolicies);
+
+  // --- RUN 2: IMMEDIATE POLICIES ONLY (Scenario B) ---
+  // This tells us the value generated ONLY by the non-deferred policies.
+  const resultImmediate = calculateIncentiveForSubset(
+    config,
+    input,
+    immediatePolicies
+  );
+
+  // --- DERIVE DEFERRED AMOUNT ---
+  // Deferred Amount = (Total Potential with All) - (Total Generated by Immediate Only)
+  // Logic: The "Lift" provided by the deferred policies (NOP boost, ATS boost, etc.) is captured here.
+  const totalPotential = resultAll.totalGenerated;
+  const totalImmediate = resultImmediate.totalGenerated;
+
+  // Determine the final deferred amount.
+  // We use Math.max(0, ...) security, though logically it should be positive if simple additivity holds.
+  // However, removing policies *could* technically increase value if they were dragging down ATS significantly,
+  // but usually volume incentives > ATS drag. We'll trust the diff.
+  const deferredIncentive = Math.max(0, totalPotential - totalImmediate);
+
+  // Determine the final released amount.
+  // This is simply the result of the "Immediate Only" run.
+  const totalReleasedNow = totalImmediate;
+
+  // MERGE RESULTS FOR UI
+  // We want to show ALL policies, but mark the relevant ones given the full context.
+  // We use 'resultAll.policies' as the base because visualization usually expects the full list.
+  // However, for the specific numeric values of "Total Incentive" per policy,
+  // 'resultAll' contains the hypothetical "Full Potential" value for each policy.
+  // We can tag them.
+
+  const finalPolicies = resultAll.policies.map((p) => {
+    const deferred = isDeferredPolicy(p);
+    return {
+      ...p,
+      isDeferred: deferred,
+      // Note: 'totalIncentive' here refers to the generated value in the "All" scenario.
+      // This is correct as "Value Generated", even if deferred.
+    };
+  });
+
+  return {
+    policies: finalPolicies,
+    totalIncentive: totalReleasedNow, // Released Immediately
+    deferredIncentive: deferredIncentive, // Released Later
+    averageTicketSize: resultAll.averageTicketSize, // Metrics based on Full Session
+    atsIncentive: resultAll.totalBoostAmount, // Metrics based on Full Session
     breakdown: {
-      totalBase: baseFromSlab,
-      totalPayouts,
-      totalPenalties,
+      totalBase: resultAll.baseFromSlab,
+      totalPayouts: resultAll.totalPayouts,
+      totalPenalties: resultAll.totalPenalties,
       totalRate:
-        termNOP > 0 ? (totalReleasedNow + totalDeferredLater) / termNOP : 0,
+        resultAll.policies.length > 0
+          ? totalPotential / resultAll.policies.length
+          : 0,
     },
   };
 }
